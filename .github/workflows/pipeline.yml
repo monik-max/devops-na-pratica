@@ -3,7 +3,7 @@ name: Integracao continua
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, fase-1-entrega]
   workflow_dispatch:
 
 permissions:
