@@ -7,12 +7,13 @@ function criarApp(gestao) {
   app.disable('x-powered-by');
   app.use((req, res, next) => {
     const inicio = process.hrtime.bigint();
+    const caminho = req.path;
     res.once('finish', () => {
       const duracaoMs = Number(process.hrtime.bigint() - inicio) / 1_000_000;
       console.log(JSON.stringify({
         horario: new Date().toISOString(),
         metodo: req.method,
-        caminho: req.path,
+        caminho,
         status: res.statusCode,
         duracaoMs: Math.round(duracaoMs),
       }));

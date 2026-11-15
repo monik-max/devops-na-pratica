@@ -1,4 +1,4 @@
-name: Integracao continua
+name: Integracao e entrega continua
 
 on:
   pull_request:
@@ -50,3 +50,63 @@ jobs:
       - run: terraform fmt -check -recursive -diff
       - run: terraform init -backend=false -lockfile=readonly
       - run: terraform validate
+
+  entrega:
+    name: Entrega e demonstração em contêiner
+    needs: [verificacao, infraestrutura]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      IMAGE: gestao-devops:${{ github.sha }}
+      COMPOSE_PROJECT_NAME: gestao-ci
+    steps:
+      - uses: actions/checkout@v6
+      - name: Conferir a configuração e construir a imagem
+        run: |
+          docker compose config --quiet
+          docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE" .
+      - name: Implantar e validar a API
+        run: |
+          bash scripts/deploy.sh "$IMAGE"
+          curl --fail --silent --show-error http://127.0.0.1:8080/health
+          curl --fail --silent --show-error http://127.0.0.1:8080/gestao/clientes \
+            | jq -e 'type == "array" and length == 10'
+          docker compose ps
+      - name: Testar provisionamento Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.17.1'
+          terraform_wrapper: false
+      - name: Aplicar IaC no laboratório do runner
+        run: |
+          docker tag "$IMAGE" gestao-devops:local
+          terraform -chdir=infra init -lockfile=readonly
+          terraform -chdir=infra apply -auto-approve
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 2 http://127.0.0.1:8081/health
+      - name: Preparar imagem validada e evidências
+        shell: bash
+        run: |
+          mkdir -p entrega
+          docker save "$IMAGE" | gzip > entrega/gestao-imagem.tar.gz
+          docker compose ps > entrega/compose-status.txt
+          docker compose logs --no-color --tail=100 gestao > entrega/gestao.log
+          printf '%s\n' "$IMAGE" > entrega/imagem.txt
+          printf '%s\n' "$GITHUB_SHA" > entrega/commit.txt
+          cd entrega
+          sha256sum gestao-imagem.tar.gz > SHA256SUMS
+      - name: Disponibilizar a versão testada
+        uses: actions/upload-artifact@v6
+        with:
+          name: gestao-entrega-${{ github.sha }}
+          path: entrega/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Encerrar os laboratórios
+        if: always()
+        run: |
+          if test -d infra/.terraform; then
+            terraform -chdir=infra destroy -auto-approve || echo "::warning::O ambiente Terraform será descartado com o runner."
+          fi
+          docker compose logs --no-color --tail=30 gestao
+          docker compose down --volumes

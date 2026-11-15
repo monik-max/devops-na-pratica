@@ -1,0 +1,25 @@
+name: gestao-devops
+
+services:
+  gestao:
+    build:
+      context: .
+    image: ${IMAGE:-gestao-devops:local}
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8080}:3000"
+    volumes:
+      - gestao-dados:/dados
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  gestao-dados:
